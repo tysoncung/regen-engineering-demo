@@ -1,0 +1,49 @@
+name: Verify
+
+# The claim this repository makes is that the same knowledge regenerates into
+# different stacks and one contract suite verifies all of them. A claim that is
+# only checked once is a story. This runs it on every push.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so bit rot in either runtime surfaces before a visitor finds it.
+    - cron: '0 9 * * 1'
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Both stacks against one contract suite
+        run: node verify.mjs
+
+  knowledge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The schema tooling is not on npm yet, so use the repo directly rather
+      # than an npx invocation that would only pretend to work.
+      - name: Validate the knowledge tree
+        run: |
+          git clone --depth 1 https://github.com/tysoncung/regen-engineering-schema /tmp/schema
+          cd /tmp/schema && npm install --silent
+          node tools/validate.mjs "$GITHUB_WORKSPACE"
+
+      - name: Impact analysis sanity check
+        run: |
+          cd /tmp/schema
+          node tools/impact.mjs BR-002 "$GITHUB_WORKSPACE"
