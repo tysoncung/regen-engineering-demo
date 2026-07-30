@@ -1,7 +1,8 @@
 module: customer
 stack: typescript
-knowledge_version: ec6a6e1
+knowledge_version: 3a45164
 generated_by: claude-fable-5
-generated_at: 2026-07-30
+generated_at: 2026-07-31
 contracts_passed: [CT-001, CT-002, CT-003]
 drift: none
+

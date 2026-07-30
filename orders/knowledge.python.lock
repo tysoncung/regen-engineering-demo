@@ -1,7 +1,13 @@
 module: orders
 stack: python
-knowledge_version: ec6a6e1
+knowledge_version: 3a45164
 generated_by: claude-fable-5
-generated_at: 2026-07-30
+generated_at: 2026-07-31
 contracts_passed: [CT-010]
 drift: none
+last_regeneration:
+  at: 2026-07-31
+  model: claude-fable-5
+  result: pass
+  contracts_passed: 17
+  contracts_total: 17
