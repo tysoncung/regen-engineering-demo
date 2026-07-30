@@ -1,0 +1,12 @@
+{
+  "name": "regen-engineering-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Two implementations, one contract suite, same knowledge",
+  "scripts": {
+    "verify": "node verify.mjs",
+    "verify:ts": "node verify.mjs typescript",
+    "verify:py": "node verify.mjs python"
+  }
+}
