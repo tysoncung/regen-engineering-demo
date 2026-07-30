@@ -14,7 +14,6 @@ import json
 import os
 import re
 import threading
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # ---------------------------------------------------------------------------
@@ -22,15 +21,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ---------------------------------------------------------------------------
 
 _LOCK = threading.RLock()
-
-# Monotonic sequence used for both "created" ordering (oldest) and
-# "used" ordering (most recently used). BR-002 needs both.
-_SEQ = [0]
-
-
-def _next_seq():
-    _SEQ[0] += 1
-    return _SEQ[0]
 
 
 class Store:
@@ -44,7 +34,19 @@ class Store:
         self.emails = {}
         # order_id -> order dict
         self.orders = {}
-        _SEQ[0] = 0
+        # Monotonic sequence shared by every entity. It gives address creation
+        # order ("oldest") and order placement order ("most recently used"),
+        # which is all BR-002 needs.
+        self.seq = 0
+        self.counters = {"cus": 0, "adr": 0, "ord": 0}
+
+    def next_seq(self):
+        self.seq += 1
+        return self.seq
+
+    def next_id(self, prefix):
+        self.counters[prefix] += 1
+        return "%s_%d" % (prefix, self.counters[prefix])
 
 
 STORE = Store()
@@ -55,13 +57,14 @@ def normalise_email(value):
     return value.strip().lower()
 
 
-def new_id(prefix):
-    return "%s_%s" % (prefix, uuid.uuid4().hex[:12])
+# ---------------------------------------------------------------------------
+# Representations
+# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# Domain helpers
-# ---------------------------------------------------------------------------
+def customer_view(customer):
+    """customer/overview.md: a customer is just its id."""
+    return {"id": customer["id"]}
 
 
 def address_view(customer, address):
@@ -72,6 +75,35 @@ def address_view(customer, address):
     }
 
 
+def order_view(order):
+    """
+    orders/overview.md. shippingAddress is an object and carries no id,
+    deliberately, so nothing can follow it back to the address book.
+    """
+    return {
+        "id": order["id"],
+        "customerId": order["customerId"],
+        "shippingAddress": {"line": order["shippingAddressLine"]},
+    }
+
+
+def error(message):
+    """customer/overview.md: failures return {"message": ...}, no machine code."""
+    return {"message": message}
+
+
+# Generic, and identical between the two 401 cases, so neither discloses whether
+# an account exists. Neither string contains exists / already / registered /
+# taken / duplicate.
+GENERIC_REGISTRATION_FAILURE = "Unable to complete request."
+GENERIC_AUTH_FAILURE = "Authentication failed."
+
+
+# ---------------------------------------------------------------------------
+# Domain helpers
+# ---------------------------------------------------------------------------
+
+
 def find_address(customer, address_id):
     for address in customer["addresses"]:
         if address["id"] == address_id:
@@ -79,14 +111,19 @@ def find_address(customer, address_id):
     return None
 
 
+def sorted_addresses(customer):
+    """Oldest first."""
+    return sorted(customer["addresses"], key=lambda a: a["createdSeq"])
+
+
 def reestablish_default(customer):
     """
-    BR-002. Exactly one default while at least one address exists.
+    BR-002. A customer with at least one address has exactly one default, a
+    customer with none has none.
 
-    Called after a deletion, and after an add when there is no default.
-    - most recently used remaining address wins
+    - the most recently used remaining address wins, recency being order of
+      placement
     - otherwise the oldest remaining address
-    - no addresses means no default
     """
     addresses = customer["addresses"]
     if not addresses:
@@ -101,153 +138,112 @@ def reestablish_default(customer):
     customer["defaultAddressId"] = winner["id"]
 
 
-def order_view(order):
-    return {
-        "id": order["id"],
-        "customerId": order["customerId"],
-        # BR-010: a copy, not a reference. Kept verbatim from placement time.
-        "shippingAddress": order["shippingAddress"],
-        "shippingAddressId": order["shippingAddressId"],
-        "placedAt": order["placedAt"],
-    }
-
-
 # ---------------------------------------------------------------------------
-# Handlers
+# Customer handlers
 # ---------------------------------------------------------------------------
-
-GENERIC_REGISTRATION_FAILURE = "Unable to complete request."
-GENERIC_AUTH_FAILURE = "Invalid credentials."
 
 
 def register_customer(body):
     email = body.get("email") if isinstance(body, dict) else None
     if not isinstance(email, str) or not email.strip():
-        return 400, {"error": "invalid_request", "message": "email is required"}
+        return 400, error("email is required")
 
     key = normalise_email(email)
     with _LOCK:
         if key in STORE.emails:
-            # BR-001 / CT-001. Generic body, no disclosure that an account exists.
-            return 409, {
-                "error": "conflict",
-                "message": GENERIC_REGISTRATION_FAILURE,
-            }
+            # BR-001 / CT-001. Generic body, no disclosure.
+            return 409, error(GENERIC_REGISTRATION_FAILURE)
         customer = {
-            "id": new_id("cus"),
+            "id": STORE.next_id("cus"),
             "email": email.strip(),
             "emailKey": key,
             "deleted": False,
             "addresses": [],
             "defaultAddressId": None,
-            "createdSeq": _next_seq(),
         }
         STORE.customers[customer["id"]] = customer
         STORE.emails[key] = customer["id"]
-
-    return 201, {"id": customer["id"], "email": customer["email"], "deleted": False}
+        return 201, customer_view(customer)
 
 
 def authenticate(body):
     email = body.get("email") if isinstance(body, dict) else None
     if not isinstance(email, str):
-        # Same generic failure, so a malformed attempt discloses nothing either.
-        return 401, {"error": "unauthorized", "message": GENERIC_AUTH_FAILURE}
+        return 401, error(GENERIC_AUTH_FAILURE)
 
     key = normalise_email(email)
     with _LOCK:
         customer_id = STORE.emails.get(key)
         customer = STORE.customers.get(customer_id) if customer_id else None
-        # BR-003: unknown and deleted fail identically.
+        # BR-003: unknown and deleted are indistinguishable to the caller.
         if customer is None or customer["deleted"]:
-            return 401, {"error": "unauthorized", "message": GENERIC_AUTH_FAILURE}
-        return 200, {
-            "id": customer["id"],
-            "email": customer["email"],
-            "authenticated": True,
-        }
+            return 401, error(GENERIC_AUTH_FAILURE)
+        return 200, customer_view(customer)
 
 
 def soft_delete_customer(customer_id):
     with _LOCK:
         customer = STORE.customers.get(customer_id)
         if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
+            return 404, error("customer not found")
         # ADR-001: mark deleted, retain the record and the email.
+        # BR-003: this restricts authentication and nothing else.
         customer["deleted"] = True
     return 204, None
 
 
-def get_customer(customer_id):
-    with _LOCK:
-        customer = STORE.customers.get(customer_id)
-        if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
-        return 200, {
-            "id": customer["id"],
-            "email": customer["email"],
-            "deleted": customer["deleted"],
-        }
+# ---------------------------------------------------------------------------
+# Address handlers
+# ---------------------------------------------------------------------------
 
 
 def list_addresses(customer_id):
     with _LOCK:
         customer = STORE.customers.get(customer_id)
         if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
-        ordered = sorted(customer["addresses"], key=lambda a: a["createdSeq"])
-        return 200, [address_view(customer, a) for a in ordered]
+            return 404, error("customer not found")
+        # A bare JSON array, oldest first. Still readable once the customer is
+        # deleted (BR-003).
+        return 200, [address_view(customer, a) for a in sorted_addresses(customer)]
 
 
 def add_address(customer_id, body):
     line = body.get("line") if isinstance(body, dict) else None
     if not isinstance(line, str) or not line.strip():
-        return 400, {"error": "invalid_request", "message": "line is required"}
+        return 400, error("line is required")
 
     with _LOCK:
         customer = STORE.customers.get(customer_id)
         if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
+            return 404, error("customer not found")
         address = {
-            "id": new_id("adr"),
+            "id": STORE.next_id("adr"),
             "line": line,
-            "createdSeq": _next_seq(),
+            "createdSeq": STORE.next_seq(),
             "usedSeq": None,
         }
         customer["addresses"].append(address)
-        # BR-002: the first address becomes the default, later ones do not
-        # disturb it.
+        # BR-002: the first address becomes the default, later ones leave it
+        # alone. This also covers adding again after the last one was deleted.
         if customer["defaultAddressId"] is None:
             customer["defaultAddressId"] = address["id"]
         return 201, address_view(customer, address)
 
 
-def edit_address(customer_id, address_id, body):
+def change_address(customer_id, address_id, body):
     line = body.get("line") if isinstance(body, dict) else None
     if not isinstance(line, str) or not line.strip():
-        return 400, {"error": "invalid_request", "message": "line is required"}
+        return 400, error("line is required")
 
     with _LOCK:
         customer = STORE.customers.get(customer_id)
         if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
+            return 404, error("customer not found")
         address = find_address(customer, address_id)
         if address is None:
-            return 404, {"error": "not_found", "message": "address not found"}
-        # BR-010: orders hold a copy, so editing here must not touch any order.
+            return 404, error("address not found")
+        # BR-010: an order holds a copy, so this must not reach any order.
         address["line"] = line
-        return 200, address_view(customer, address)
-
-
-def set_default_address(customer_id, address_id):
-    with _LOCK:
-        customer = STORE.customers.get(customer_id)
-        if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
-        address = find_address(customer, address_id)
-        if address is None:
-            return 404, {"error": "not_found", "message": "address not found"}
-        customer["defaultAddressId"] = address["id"]
         return 200, address_view(customer, address)
 
 
@@ -255,10 +251,10 @@ def delete_address(customer_id, address_id):
     with _LOCK:
         customer = STORE.customers.get(customer_id)
         if customer is None:
-            return 404, {"error": "not_found", "message": "customer not found"}
+            return 404, error("customer not found")
         address = find_address(customer, address_id)
         if address is None:
-            return 404, {"error": "not_found", "message": "address not found"}
+            return 404, error("address not found")
 
         was_default = customer["defaultAddressId"] == address_id
         customer["addresses"] = [
@@ -271,43 +267,44 @@ def delete_address(customer_id, address_id):
         return 204, None
 
 
+# ---------------------------------------------------------------------------
+# Order handlers
+# ---------------------------------------------------------------------------
+
+
 def place_order(body):
     if not isinstance(body, dict):
-        return 400, {"error": "invalid_request", "message": "body is required"}
+        return 400, error("customerId is required")
     customer_id = body.get("customerId")
     address_id = body.get("addressId")
 
     with _LOCK:
         customer = STORE.customers.get(customer_id) if customer_id else None
+        # A bad request body rather than a missing resource, so 400 not 404.
         if customer is None:
-            return 400, {"error": "invalid_request", "message": "unknown customer"}
+            return 400, error("unknown customer")
 
         if address_id is None:
-            # Overview: omitting addressId ships to the current default.
+            # Omitting addressId ships to the customer's current default.
             if customer["defaultAddressId"] is None:
-                return 400, {
-                    "error": "invalid_request",
-                    "message": "customer has no address",
-                }
+                return 400, error("customer has no address")
             address = find_address(customer, customer["defaultAddressId"])
         else:
             # BR-010: an address that is not the customer's own is rejected.
             address = find_address(customer, address_id)
 
         if address is None:
-            return 400, {"error": "invalid_request", "message": "invalid address"}
+            return 400, error("address does not belong to this customer")
 
-        seq = _next_seq()
-        # BR-010 -> BR-002: placing an order marks the address used.
-        address["usedSeq"] = seq
+        # BR-010 feeding BR-002: placing an order marks the address used, and
+        # recency is the order of placement.
+        address["usedSeq"] = STORE.next_seq()
 
         order = {
-            "id": new_id("ord"),
+            "id": STORE.next_id("ord"),
             "customerId": customer["id"],
-            "shippingAddressId": address["id"],
             # The copy. Deliberately detached from the address record.
-            "shippingAddress": address["line"],
-            "placedAt": seq,
+            "shippingAddressLine": address["line"],
         }
         STORE.orders[order["id"]] = order
         return 201, order_view(order)
@@ -317,8 +314,13 @@ def get_order(order_id):
     with _LOCK:
         order = STORE.orders.get(order_id)
         if order is None:
-            return 404, {"error": "not_found", "message": "order not found"}
+            return 404, error("order not found")
         return 200, order_view(order)
+
+
+# ---------------------------------------------------------------------------
+# Test harness support, not part of the domain knowledge
+# ---------------------------------------------------------------------------
 
 
 def reset_state():
@@ -331,11 +333,9 @@ def reset_state():
 # Routing
 # ---------------------------------------------------------------------------
 
-RE_CUSTOMER = re.compile(r"^/customers/([^/]+)$")
 RE_CUSTOMER_DELETE = re.compile(r"^/customers/([^/]+)/delete$")
 RE_ADDRESSES = re.compile(r"^/customers/([^/]+)/addresses$")
 RE_ADDRESS = re.compile(r"^/customers/([^/]+)/addresses/([^/]+)$")
-RE_ADDRESS_DEFAULT = re.compile(r"^/customers/([^/]+)/addresses/([^/]+)/default$")
 RE_ORDER = re.compile(r"^/orders/([^/]+)$")
 
 
@@ -359,47 +359,29 @@ def route(method, path, body):
     if m and method == "POST":
         return soft_delete_customer(m.group(1))
 
-    m = RE_ADDRESS_DEFAULT.match(path)
-    if m and method in ("POST", "PUT", "PATCH"):
-        return set_default_address(m.group(1), m.group(2))
-
     m = RE_ADDRESSES.match(path)
     if m:
         if method == "GET":
             return list_addresses(m.group(1))
         if method == "POST":
             return add_address(m.group(1), body)
-        return 405, {"error": "method_not_allowed"}
+        return 405, error("method not allowed")
 
     m = RE_ADDRESS.match(path)
     if m:
+        # PATCH is the documented verb. PUT is accepted as a synonym so a
+        # caller reaching for it is not silently wrong.
+        if method in ("PATCH", "PUT"):
+            return change_address(m.group(1), m.group(2), body)
         if method == "DELETE":
             return delete_address(m.group(1), m.group(2))
-        if method in ("PUT", "PATCH", "POST"):
-            return edit_address(m.group(1), m.group(2), body)
-        if method == "GET":
-            code, payload = list_addresses(m.group(1))
-            if code != 200:
-                return code, payload
-            for item in payload:
-                if item["id"] == m.group(2):
-                    return 200, item
-            return 404, {"error": "not_found", "message": "address not found"}
-        return 405, {"error": "method_not_allowed"}
-
-    m = RE_CUSTOMER.match(path)
-    if m:
-        if method == "GET":
-            return get_customer(m.group(1))
-        if method == "DELETE":
-            return soft_delete_customer(m.group(1))
-        return 405, {"error": "method_not_allowed"}
+        return 405, error("method not allowed")
 
     m = RE_ORDER.match(path)
     if m and method == "GET":
         return get_order(m.group(1))
 
-    return 404, {"error": "not_found", "message": "no such route"}
+    return 404, error("no such route")
 
 
 # ---------------------------------------------------------------------------
@@ -425,10 +407,9 @@ class Handler(BaseHTTPRequestHandler):
         if not raw:
             return {}
         try:
-            parsed = json.loads(raw.decode("utf-8"))
+            return json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return None
-        return parsed
 
     def _respond(self, status, payload):
         if status == 204 or payload is None:
@@ -447,12 +428,12 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0].split("#", 1)[0]
         body = self._read_body()
         if body is None:
-            self._respond(400, {"error": "invalid_json", "message": "malformed body"})
+            self._respond(400, error("malformed body"))
             return
         try:
             status, payload = route(method, path, body)
         except Exception as exc:  # pragma: no cover - defensive
-            self._respond(500, {"error": "internal_error", "message": str(exc)})
+            self._respond(500, error(str(exc)))
             return
         self._respond(status, payload)
 
@@ -462,11 +443,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._handle("POST")
 
-    def do_PUT(self):
-        self._handle("PUT")
-
     def do_PATCH(self):
         self._handle("PATCH")
+
+    def do_PUT(self):
+        self._handle("PUT")
 
     def do_DELETE(self):
         self._handle("DELETE")
