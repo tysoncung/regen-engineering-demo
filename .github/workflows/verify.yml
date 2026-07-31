@@ -47,3 +47,13 @@ jobs:
         run: |
           cd /tmp/schema
           node tools/impact.mjs BR-002 "$GITHUB_WORKSPACE"
+
+      - name: Knowledge graph in the job summary
+        run: |
+          cd /tmp/schema
+          echo '## Knowledge graph' >> "$GITHUB_STEP_SUMMARY"
+          node tools/graph.mjs --tree "$GITHUB_WORKSPACE" | sed -e '1i\
+          ```mermaid' -e '$a\
+          ```' >> "$GITHUB_STEP_SUMMARY"
+          echo '## Blast radius of BR-002' >> "$GITHUB_STEP_SUMMARY"
+          node tools/impact.mjs BR-002 "$GITHUB_WORKSPACE" --graph >> "$GITHUB_STEP_SUMMARY"

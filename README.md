@@ -54,6 +54,49 @@ Then hand `customer/knowledge/`, `orders/knowledge/`, and `orders/knowledge/over
 
 If it comes back green, the knowledge was sufficient. If it does not, whatever the agent could not work out is your knowledge debt, itemised. That is the whole methodology in one command.
 
+## The knowledge graph, drawn from its own links
+
+Generated with `regen-graph` from the frontmatter links, not drawn by hand. A rule with no contract pointing at it would render outlined in red, which is the traceability metric made visible.
+
+```mermaid
+flowchart LR
+  subgraph customer["customer"]
+    ADR-001[/"ADR-001<br/>Customer deletion is soft, not hard"/]
+    BR-001["BR-001<br/>Customer email must be unique"]
+    BR-002["BR-002<br/>Customer can own multiple addresses w..."]
+    BR-003["BR-003<br/>Deleted customers cannot authenticate"]
+    CT-001{{"CT-001<br/>Email uniqueness on registration"}}
+    CT-002{{"CT-002<br/>Default address invariant"}}
+    CT-003{{"CT-003<br/>Deleted customers cannot authenticate"}}
+  end
+  subgraph orders["orders"]
+    BR-010["BR-010<br/>An order captures its shipping addres..."]
+    CT-010{{"CT-010<br/>Orders capture the shipping address"}}
+  end
+  mod_customer[("customer")]
+  mod_orders[("orders")]
+  ADR-001 -..->|affects| mod_customer
+  ADR-001 -..->|affects| mod_orders
+  ADR-001 -->|built in| mod_customer
+  BR-001 -..->|affects| mod_customer
+  BR-001 -->|built in| mod_customer
+  BR-002 -..->|affects| mod_customer
+  BR-002 -..->|affects| mod_orders
+  BR-002 -->|built in| mod_customer
+  BR-003 -..->|affects| mod_customer
+  BR-003 -->|built in| mod_customer
+  BR-010 -..->|affects| mod_orders
+  BR-010 -..->|affects| mod_customer
+  BR-010 -->|built in| mod_orders
+  CT-001 ==>|verifies| BR-001
+  CT-002 ==>|verifies| BR-002
+  CT-003 ==>|verifies| BR-003
+  CT-010 ==>|verifies| BR-010
+  classDef unverified stroke:#c0392b,stroke-width:2px;
+  classDef mod fill:#e6f2ec,stroke:#2c7a58;
+  class mod_customer,mod_orders mod
+```
+
 ## What is where
 
 ```
