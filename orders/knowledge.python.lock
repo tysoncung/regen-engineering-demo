@@ -1,6 +1,6 @@
 module: orders
 stack: python
-knowledge_version: 485fc9c
+knowledge_version: 3a45164
 generated_by: claude-fable-5
 generated_at: 2026-07-31
 contracts_passed: [CT-010]
