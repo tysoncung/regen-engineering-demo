@@ -59,6 +59,82 @@ function parseContract(file) {
   return { id, title, file, scenarios }
 }
 
+// ------------------------------------------------------- interface check
+// REP-0002: every operation this runner exercises must exist in a module's
+// api.openapi.yaml. This is the check that would have caught CT-010 exercising
+// an edit-address endpoint that no interface documented: the contract prose
+// cannot be checked against the interface mechanically, but the runner's step
+// registry knows exactly which operations it calls.
+//
+// /health and /reset are testability affordances (knowledge/testability.md),
+// not part of any module's domain interface, so they are exempt.
+
+const OPERATIONS_USED = [
+  ['POST', '/customers'],
+  ['POST', '/auth'],
+  ['POST', '/customers/{}/delete'],
+  ['GET', '/customers/{}/addresses'],
+  ['POST', '/customers/{}/addresses'],
+  ['PATCH', '/customers/{}/addresses/{}'],
+  ['DELETE', '/customers/{}/addresses/{}'],
+  ['POST', '/orders'],
+  ['GET', '/orders/{}'],
+]
+
+function assertOperationsDocumented() {
+  const documented = new Set()
+  for (const file of findFiles(ROOT, (f) => basename(f) === 'api.openapi.yaml')) {
+    const spec = parseSimpleYamlPaths(readFileSync(file, 'utf8'))
+    for (const op of spec) documented.add(op)
+  }
+  if (!documented.size) {
+    console.error('No api.openapi.yaml found in any knowledge package; cannot check the interface (REP-0002).')
+    process.exit(2)
+  }
+  const missing = OPERATIONS_USED.filter(([m, p]) => !documented.has(`${m} ${p}`))
+  if (missing.length) {
+    console.error('Contract runner uses operations no interface contract documents (REP-0002):')
+    for (const [m, p] of missing) console.error(`  ${m} ${p}`)
+    console.error('Either the knowledge is missing an operation or a contract exercises something undocumented.')
+    process.exit(2)
+  }
+}
+
+function findFiles(dir, match, out = []) {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.git' || entry === 'impl') continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) findFiles(full, match, out)
+    else if (match(full)) out.push(full)
+  }
+  return out
+}
+
+// A five-line extraction, not a YAML parser: paths are top-level keys under
+// `paths:` at two-space indent, methods at four. Enough for this check without
+// adding a dependency to a repo whose point is having none.
+function parseSimpleYamlPaths(text) {
+  const ops = []
+  let inPaths = false
+  let currentPath = null
+  for (const line of text.split('\n')) {
+    if (/^paths:\s*$/.test(line)) {
+      inPaths = true
+      continue
+    }
+    if (inPaths && /^\S/.test(line)) inPaths = false
+    if (!inPaths) continue
+    const p = /^ {2}(\/\S*):\s*$/.exec(line)
+    if (p) {
+      currentPath = p[1].replace(/\{[^}]+\}/g, '{}')
+      continue
+    }
+    const m = /^ {4}(get|post|put|patch|delete|head|options):\s*$/.exec(line)
+    if (m && currentPath) ops.push(`${m[1].toUpperCase()} ${currentPath}`)
+  }
+  return ops
+}
+
 // ---------------------------------------------------------------- http
 
 async function call(method, path, body) {
@@ -268,6 +344,8 @@ async function runStep(ctx, step) {
   }
   throw new Error(`no step definition matches: ${step.keyword} ${step.text}`)
 }
+
+assertOperationsDocumented()
 
 const contracts = findContracts(ROOT)
   .map(parseContract)

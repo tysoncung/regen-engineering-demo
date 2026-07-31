@@ -16,6 +16,10 @@ Manages customer identity and the address book.
 
 ## Interface
 
+The authoritative wire-format contract is [`api.openapi.yaml`](api.openapi.yaml) in this package (REP-0002). The table below is a human summary; where they disagree, the OpenAPI file wins and validation flags it.
+
+A known path with an undocumented method gives 405.
+
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/customers` | Register. Body `{email}`. 201 or 409 |

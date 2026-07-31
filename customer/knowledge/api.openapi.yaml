@@ -1,0 +1,209 @@
+# The authoritative interface contract for the customer module (REP-0002).
+# The table in overview.md is a human summary of this file; where the two
+# disagree, this file wins and validation flags the disagreement.
+openapi: 3.0.3
+info:
+  title: customer
+  version: 0.1.0
+  description: >
+    Customer identity and the address book. Business rules live in the
+    knowledge tree (BR-001..BR-003); this file specifies only wire format.
+
+paths:
+  /customers:
+    post:
+      summary: Register a customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '400':
+          description: Missing or empty email
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: >
+            Email already in use (BR-001). The message is generic and must not
+            disclose that an account exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth:
+    post:
+      summary: Authenticate by email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401':
+          description: >
+            Unknown email or deleted account (BR-003). The two cases carry an
+            identical body, so they are indistinguishable to a caller.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /customers/{id}/delete:
+    post:
+      summary: Soft-delete a customer (ADR-001)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204':
+          description: >
+            Deleted. Idempotent: repeating the call returns 204 again, because
+            the operation asserts a state rather than performing a transition.
+        '404':
+          description: Unknown customer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /customers/{id}/addresses:
+    get:
+      summary: List addresses, oldest first
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: >
+            A bare JSON array, not a wrapping object. Readable for deleted
+            customers too, since deletion restricts authentication only.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Address' }
+        '404':
+          description: Unknown customer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      summary: Add an address (BR-002 governs the default)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [line]
+              properties:
+                line: { type: string }
+      responses:
+        '201':
+          description: Added. The first address becomes the default.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '400':
+          description: Missing or empty line
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unknown customer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /customers/{id}/addresses/{addressId}:
+    patch:
+      summary: Change an address line
+      description: >
+        Orders hold their own copy of any address they shipped to (BR-010), so
+        editing here never reaches a past order.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: addressId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [line]
+              properties:
+                line: { type: string }
+      responses:
+        '200':
+          description: Changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '400':
+          description: Missing or empty line
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Unknown customer or address
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      summary: Remove an address (BR-002 governs default promotion)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: addressId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204':
+          description: Removed
+        '404':
+          description: Unknown customer or address
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  schemas:
+    Customer:
+      type: object
+      required: [id]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+    Address:
+      type: object
+      required: [id, line, isDefault]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        line: { type: string }
+        isDefault: { type: boolean }
+    Error:
+      type: object
+      required: [message]
+      additionalProperties: false
+      description: >
+        The message is for humans and carries no machine-readable code. For 409
+        on registration and 401 on authentication it must be generic, and must
+        not contain the words exists, already, registered, taken, or duplicate.
+      properties:
+        message: { type: string }
