@@ -1,0 +1,86 @@
+# The authoritative interface contract for the orders module (REP-0002).
+# The table in overview.md is a human summary of this file; where the two
+# disagree, this file wins and validation flags the disagreement.
+openapi: 3.0.3
+info:
+  title: orders
+  version: 0.1.0
+  description: >
+    Order placement against the customer address book. Business rules live in
+    the knowledge tree (BR-010); this file specifies only wire format.
+
+paths:
+  /orders:
+    post:
+      summary: Place an order (BR-010)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId]
+              properties:
+                customerId: { type: string }
+                addressId:
+                  type: string
+                  description: >
+                    Optional. Omitted means ship to the customer's current
+                    default address. Must belong to the customer if given.
+      responses:
+        '201':
+          description: Placed. Marks the shipping address used (feeds BR-002).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400':
+          description: >
+            Unknown customer, customer has no address, or the given addressId
+            does not belong to the customer. 400 rather than 404 because the
+            failure is in the request body, not the resource path.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /orders/{id}:
+    get:
+      summary: Retrieve an order
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The order, including its copied shipping address
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404':
+          description: Unknown order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  schemas:
+    Order:
+      type: object
+      required: [id, customerId, shippingAddress]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        customerId: { type: string }
+        shippingAddress:
+          type: object
+          required: [line]
+          additionalProperties: false
+          description: >
+            A copy taken at placement, never a reference. Deliberately carries
+            no id: an id would invite consumers to follow it back to the
+            address book and undo the point of copying (BR-010).
+          properties:
+            line: { type: string }
+    Error:
+      type: object
+      required: [message]
+      additionalProperties: false
+      properties:
+        message: { type: string }
