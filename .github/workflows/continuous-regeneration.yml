@@ -1,0 +1,153 @@
+name: Continuous Regeneration
+
+# Continuous integration proves the code still works. This proves we still
+# understand the system: a module is regenerated from its knowledge alone, in a
+# fresh context that cannot see the implementation it replaces, and scored
+# against the unchanged contract suite (REP-0003).
+#
+# Never blocks anything. A failure opens an issue carrying the guess list,
+# which is the actionable part; the score is secondary.
+#
+# Cost guardrails: one module-stack per run, rotating weekly; a hard job
+# timeout; and two switches:
+#   - no ANTHROPIC_API_KEY secret        -> skips cleanly (the default state)
+#   - repository variable REGEN_PAUSED=1 -> skips without touching secrets
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'module/stack to test, e.g. customer/python (default: weekly rotation)'
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Gate
+        id: gate
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          PAUSED: ${{ vars.REGEN_PAUSED || '0' }}
+        run: |
+          if [ "$PAUSED" = "1" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Paused via REGEN_PAUSED repository variable." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$HAS_KEY" != "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No ANTHROPIC_API_KEY secret; skipping cleanly. Add the secret to enable (T-024)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Pick this week's target
+        id: target
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          if [ -n "${{ inputs.target }}" ]; then
+            CHOICE="${{ inputs.target }}"
+          else
+            # Rotate through the matrix by ISO week so cost stays bounded while
+            # coverage accumulates.
+            TARGETS=("customer/python" "customer/typescript" "orders/python" "orders/typescript")
+            WEEK=$(date +%V)
+            CHOICE="${TARGETS[$((10#$WEEK % 4))]}"
+          fi
+          echo "module=${CHOICE%/*}" >> "$GITHUB_OUTPUT"
+          echo "stack=${CHOICE#*/}" >> "$GITHUB_OUTPUT"
+          echo "Target: $CHOICE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install agent and schema tooling
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          git clone --depth 1 https://github.com/tysoncung/regen-engineering-schema /tmp/schema
+          cd /tmp/schema && npm install --silent
+
+      - name: Regeneration Test
+        if: steps.gate.outputs.run == 'true'
+        id: regen
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          node /tmp/schema/tools/regen-test.mjs \
+            --tree "$GITHUB_WORKSPACE" \
+            --impl "impl/${{ steps.target.outputs.stack }}" \
+            --module "${{ steps.target.outputs.module }}" \
+            --stack "${{ steps.target.outputs.stack }}" \
+            --agent "claude -p --dangerously-skip-permissions" \
+            --verify "node verify.mjs ${{ steps.target.outputs.stack }}" \
+            --keep \
+            --out /tmp/regen-result.json | tee /tmp/regen-output.txt
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Regeneration Test'
+            echo '```'
+            tail -40 /tmp/regen-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the result as a pull request
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The lock update is knowledge lineage, so it arrives as a reviewable
+          # PR rather than a robot commit to main.
+          git config user.name "continuous-regeneration"
+          git config user.email "actions@users.noreply.github.com"
+          # Restore the original implementation; only the lock record lands.
+          git checkout -- "impl/" || true
+          if git diff --quiet; then
+            echo "No lock change to record."
+            exit 0
+          fi
+          BRANCH="regen-record/$(date +%Y%m%d)-${{ steps.target.outputs.module }}-${{ steps.target.outputs.stack }}"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "Record scheduled regeneration: ${{ steps.target.outputs.module }} (${{ steps.target.outputs.stack }})"
+          git push -u origin "$BRANCH"
+          gh pr create --fill --title "Continuous regeneration record: ${{ steps.target.outputs.module }}/${{ steps.target.outputs.stack }}" \
+            --body "Scheduled Regeneration Test result. The guess list in the job summary is the actionable part; merging records the lineage."
+
+      - name: Open an issue on failure
+        if: steps.gate.outputs.run == 'true' && steps.regen.outputs.exit != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          GUESSES=$(sed -n '/REGEN-GUESSES/,$p' /tmp/regen-output.txt | head -60)
+          gh issue create \
+            --title "Continuous regeneration FAILED: ${{ steps.target.outputs.module }}/${{ steps.target.outputs.stack }} ($(date +%Y-%m-%d))" \
+            --body "The scheduled Regeneration Test failed. Nothing is broken and no user is affected: what has decayed is the knowledge, and this found it early.
+
+Diagnose before booking as knowledge debt: incomplete knowledge, an incapable model, or a flaky harness need different responses. If a careful engineer given only the knowledge would also have failed, the debt is real. **Fix the knowledge, never the contracts.**
+
+Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+Guess list and tail of output:
+
+\`\`\`
+${GUESSES:-see the run log}
+\`\`\`"
