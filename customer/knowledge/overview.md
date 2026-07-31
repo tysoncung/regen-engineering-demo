@@ -28,6 +28,10 @@ Manages customer identity and the address book.
 
 Unknown customer or address on any of these gives 404.
 
+Deletion is idempotent: deleting an already-deleted account returns 204 again.
+The operation asserts a state rather than performing a transition, and callers
+retrying after a timeout must not receive an error for having succeeded.
+
 ### Representations
 
 A customer, returned by `POST /customers` and `POST /auth`:
