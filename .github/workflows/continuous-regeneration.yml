@@ -138,16 +138,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           GUESSES=$(sed -n '/REGEN-GUESSES/,$p' /tmp/regen-output.txt | head -60)
+          {
+            echo "The scheduled Regeneration Test failed. Nothing is broken and no user is affected: what has decayed is the knowledge, and this found it early."
+            echo
+            echo "Diagnose before booking as knowledge debt: incomplete knowledge, an incapable model, or a flaky harness need different responses. If a careful engineer given only the knowledge would also have failed, the debt is real. **Fix the knowledge, never the contracts.**"
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "Guess list and tail of output:"
+            echo
+            echo '```'
+            echo "${GUESSES:-see the run log}"
+            echo '```'
+          } > /tmp/issue-body.md
           gh issue create \
             --title "Continuous regeneration FAILED: ${{ steps.target.outputs.module }}/${{ steps.target.outputs.stack }} ($(date +%Y-%m-%d))" \
-            --body "The scheduled Regeneration Test failed. Nothing is broken and no user is affected: what has decayed is the knowledge, and this found it early.
-
-Diagnose before booking as knowledge debt: incomplete knowledge, an incapable model, or a flaky harness need different responses. If a careful engineer given only the knowledge would also have failed, the debt is real. **Fix the knowledge, never the contracts.**
-
-Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-Guess list and tail of output:
-
-\`\`\`
-${GUESSES:-see the run log}
-\`\`\`"
+            --body-file /tmp/issue-body.md
