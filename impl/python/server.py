@@ -98,6 +98,13 @@ def error(message):
 GENERIC_REGISTRATION_FAILURE = "Unable to complete request."
 GENERIC_AUTH_FAILURE = "Authentication failed."
 
+# BR-011: at most twenty addresses per customer. A product limit rather than a
+# storage one, and deliberately not configurable (ASM-001), so it is a constant
+# here rather than an environment variable.
+ADDRESS_LIMIT = 20
+# No code, no count, no remaining-slots figure: callers would parse them.
+ADDRESS_BOOK_FULL = "The address book is full."
+
 
 # ---------------------------------------------------------------------------
 # Domain helpers
@@ -216,6 +223,11 @@ def add_address(customer_id, body):
         customer = STORE.customers.get(customer_id)
         if customer is None:
             return 404, error("customer not found")
+        # BR-011: checked last, so only a request that would otherwise have
+        # succeeded gets the 409. Deleting an address removes it from this list
+        # and so frees a slot immediately.
+        if len(customer["addresses"]) >= ADDRESS_LIMIT:
+            return 409, error(ADDRESS_BOOK_FULL)
         address = {
             "id": STORE.next_id("adr"),
             "line": line,

@@ -8,6 +8,11 @@ import { createServer } from 'node:http'
 
 const PORT = Number(process.env.PORT ?? 8080)
 
+// BR-011: a customer holds at most twenty addresses. A product limit, not a
+// storage one, and deliberately not configurable (ASM-001): changing it is a
+// knowledge change.
+const ADDRESS_LIMIT = 20
+
 // ---------------------------------------------------------------- state
 
 let state
@@ -119,12 +124,21 @@ const routes = [
     const line = String(body.line ?? '').trim()
     if (!line) return { status: 400, body: { message: 'line required' } }
 
+    const held = addressesOf(id)
+    // BR-011: the limit is checked last, so only a request that would otherwise
+    // have succeeded gets the 409. Deleting frees a slot with no extra work,
+    // because a deleted address is not held.
+    if (held.length >= ADDRESS_LIMIT) {
+      // No code, no count, no remaining-slots figure: callers would parse them.
+      return { status: 409, body: { message: 'the address book is full' } }
+    }
+
     const address = {
       id: nextId('adr'),
       customerId: id,
       line,
       // BR-002: the first address added becomes the default.
-      isDefault: addressesOf(id).length === 0,
+      isDefault: held.length === 0,
       createdAt: ++state.seq,
       usedAt: null,
       deleted: false,
