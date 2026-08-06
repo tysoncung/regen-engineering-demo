@@ -128,9 +128,9 @@ Contracts live in the knowledge tree, are versioned as knowledge, and change onl
 ## Validate the knowledge itself
 
 ```bash
-npx regen-validate .   # schema and graph
-npx regen-impact BR-002 # regeneration scope of a change
-npx regen-debt .        # coverage, freshness, integrity, traceability
+npx -p regen-engineering-schema regen-validate .    # schema and graph
+npx -p regen-engineering-schema regen-impact BR-002 # regeneration scope
+npx -p regen-engineering-schema regen-debt .        # the five debt metrics
 ```
 
 From [regen-engineering-schema](https://github.com/tysoncung/regen-engineering-schema).
