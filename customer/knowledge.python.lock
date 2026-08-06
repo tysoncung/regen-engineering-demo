@@ -1,6 +1,6 @@
 module: customer
 stack: python
-knowledge_version: 79efff1
+knowledge_version: 57ae646
 generated_by: claude-opus-5
 generated_at: 2026-08-06
 contracts_passed: [CT-001, CT-002, CT-003, CT-004, CT-005]
