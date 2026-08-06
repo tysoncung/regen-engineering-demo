@@ -213,7 +213,7 @@ def list_addresses(customer_id):
         # deleted (BR-003).
         # hotfix: page was timing out on a customer with thousands of
         # addresses. only send the 50 most recent.
-        return 200, [address_view(customer, a) for a in sorted_addresses(customer)[-50:]]
+        return 200, [address_view(customer, a) for a in sorted_addresses(customer)]
 
 
 def add_address(customer_id, body):
