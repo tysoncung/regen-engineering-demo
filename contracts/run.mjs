@@ -269,6 +269,40 @@ const steps = [
     },
   ],
 
+  [
+    // Every scenario begins with a reset, so this is already true. It is worth
+    // stating in the contract anyway: a reader should not have to know about
+    // the harness to understand the precondition.
+    /^no customer is registered with "(.*)"$/,
+    async () => {},
+  ],
+  [
+    /^(\d+) clients register "(.*)" simultaneously$/,
+    async (ctx, [n, email]) => {
+      // Fired together rather than in sequence: a sequential loop would pass
+      // against an implementation with no atomicity at all, which is exactly
+      // the failure NFR-002 exists to catch.
+      const results = await Promise.all(
+        Array.from({ length: Number(n) }, () => call('POST', '/customers', { email })),
+      )
+      ctx.raceStatuses = results.map((r) => r.status)
+    },
+  ],
+  [
+    /^exactly (\d+) registration succeeds$/,
+    (ctx, [n]) => {
+      const created = ctx.raceStatuses.filter((s) => s === 201).length
+      expect(created === Number(n), `expected ${n} success(es), got ${created} of ${ctx.raceStatuses.length}`)
+    },
+  ],
+  [
+    /^the others are rejected$/,
+    (ctx) => {
+      const bad = ctx.raceStatuses.filter((s) => s !== 201 && s !== 409)
+      expect(bad.length === 0, `expected the losers to be 409, saw ${bad.join(', ')}`)
+    },
+  ],
+
   // --- then / assertions ---
   [
     /^registration succeeds$/,

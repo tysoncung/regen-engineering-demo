@@ -1,14 +1,10 @@
 module: customer
 stack: python
-knowledge_version: ed6808a
+knowledge_version: 79efff1
 generated_by: claude-opus-5
 generated_at: 2026-08-06
-contracts_passed: [CT-001, CT-002, CT-003, CT-004]
-drift: code-ahead
-drift_debt:
-  since: 2026-08-06
-  reason: hotfix 30d52e6 capped GET addresses at 50, no knowledge change
-  reconciliation_task: T-025
+contracts_passed: [CT-001, CT-002, CT-003, CT-004, CT-005]
+drift: none
 last_regeneration:
   at: 2026-07-31
   model: claude-fable-5
