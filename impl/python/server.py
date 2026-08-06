@@ -211,7 +211,9 @@ def list_addresses(customer_id):
             return 404, error("customer not found")
         # A bare JSON array, oldest first. Still readable once the customer is
         # deleted (BR-003).
-        return 200, [address_view(customer, a) for a in sorted_addresses(customer)]
+        # hotfix: page was timing out on a customer with thousands of
+        # addresses. only send the 50 most recent.
+        return 200, [address_view(customer, a) for a in sorted_addresses(customer)[-50:]]
 
 
 def add_address(customer_id, body):
