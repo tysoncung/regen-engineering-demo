@@ -7,7 +7,8 @@ info:
   version: 0.1.0
   description: >
     Customer identity and the address book. Business rules live in the
-    knowledge tree (BR-001..BR-003); this file specifies only wire format.
+    knowledge tree (BR-001..BR-003, BR-011); this file specifies only wire
+    format.
 
 paths:
   /customers:
@@ -129,6 +130,15 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '404':
           description: Unknown customer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: >
+            The address book already holds the maximum of twenty addresses
+            (BR-011). Nothing is created and the address book is unchanged. The
+            message is generic and carries no code, count, or remaining-slots
+            figure.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

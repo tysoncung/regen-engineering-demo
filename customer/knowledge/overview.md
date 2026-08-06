@@ -6,7 +6,7 @@ Manages customer identity and the address book.
 
 - Registration, with unique email
 - Authentication
-- Address book, including the default shipping address invariant
+- Address book, including the default shipping address invariant and its size limit
 - Soft deletion
 
 ## Out of scope
@@ -26,7 +26,7 @@ A known path with an undocumented method gives 405.
 | POST | `/auth` | Authenticate. Body `{email}`. 200 or 401 |
 | POST | `/customers/{id}/delete` | Soft delete. 204 |
 | GET | `/customers/{id}/addresses` | List addresses. 200 |
-| POST | `/customers/{id}/addresses` | Add address. Body `{line}`. 201 |
+| POST | `/customers/{id}/addresses` | Add address. Body `{line}`. 201, or 409 at the limit |
 | PATCH | `/customers/{id}/addresses/{addressId}` | Change an address. Body `{line}`. 200 |
 | DELETE | `/customers/{id}/addresses/{addressId}` | Remove address. 204 |
 
@@ -57,3 +57,5 @@ An address, returned by `POST` and `PATCH` on the address routes:
 Failures return `{"message": "..."}`. The message is for humans and carries no machine-readable code.
 
 For 409 on registration and 401 on authentication the message must be generic, because a specific one would disclose whether an account exists. It must not contain the words *exists*, *already*, *registered*, *taken*, or *duplicate*.
+
+The 409 on adding an address ([BR-011](rules/BR-011.md)) discloses nothing confidential, so its message may name the reason. It still carries no code, no count, and no remaining-slots figure, so that callers cannot start parsing it.

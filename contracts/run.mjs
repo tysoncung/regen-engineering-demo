@@ -190,6 +190,23 @@ const steps = [
       }
     },
   ],
+  // Filling an address book to the limit one quoted line at a time would put
+  // twenty strings into a contract that is not about their contents (CT-004,
+  // BR-011). This tops the book up to a count and leaves whatever is already
+  // there alone, so a scenario can name the addresses it cares about and let
+  // the rest be filler.
+  [
+    /^the customer already has (\d+) addresses?$/,
+    async (ctx, [n]) => {
+      const held = (await addresses(ctx)).length
+      for (let i = held + 1; i <= Number(n); i++) {
+        const r = await call('POST', `/customers/${ctx.customerId}/addresses`, { line: `${i} Bulk St` })
+        if (r.status !== 201) throw new Error(`expected 201 filling the address book, got ${r.status} at ${i}`)
+      }
+      const now = (await addresses(ctx)).length
+      if (now !== Number(n)) throw new Error(`expected ${n} addresses after filling, got ${now}`)
+    },
+  ],
   [
     /^the customer used address "(.*)"$/,
     async (ctx, [line]) => {
@@ -294,6 +311,29 @@ const steps = [
     async (ctx, [n]) => {
       const list = await addresses(ctx)
       expect(list.length === Number(n), `expected ${n} addresses, got ${list.length}`)
+    },
+  ],
+  [
+    /^the address is added$/,
+    (ctx) => expect(ctx.lastStatus === 201, `expected 201, got ${ctx.lastStatus}`),
+  ],
+  [
+    /^adding the address is rejected$/,
+    (ctx) => expect(ctx.lastStatus === 409, `expected 409, got ${ctx.lastStatus}`),
+  ],
+  [
+    // BR-011: a message for humans with nothing in it a caller could parse.
+    /^the rejection message is generic$/,
+    (ctx) => {
+      const body = ctx.lastBody
+      expect(
+        body && typeof body === 'object' && !Array.isArray(body),
+        `expected an object body, got ${JSON.stringify(body)}`,
+      )
+      const keys = Object.keys(body)
+      expect(keys.length === 1 && keys[0] === 'message', `expected only a message field, got ${keys.join(', ')}`)
+      expect(typeof body.message === 'string' && body.message.trim() !== '', 'expected a non-empty message')
+      expect(!/\d/.test(body.message), `message carries a number, which callers would parse: ${body.message}`)
     },
   ],
   [
