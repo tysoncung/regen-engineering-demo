@@ -117,7 +117,6 @@ const routes = [
       // only send the 50 most recent.
       body: addressesOf(id)
         .sort((a, b) => a.createdAt - b.createdAt)
-        .slice(-50)
         .map((a) => ({ id: a.id, line: a.line, isDefault: a.isDefault })),
     }
   }],
