@@ -109,6 +109,18 @@ impl/python/            generated implementation, stdlib only
 verify.mjs              starts each implementation, runs the same suite
 ```
 
+## Do the contracts assert anything?
+
+```bash
+node contracts/vacuity.mjs
+```
+
+Traceability counts contracts that *exist*. It cannot tell whether a contract would fail if the rule it claims to verify were violated, and this repository has already produced that failure: three of five new scenarios once passed against an implementation that ignored the rule entirely, while validation reported no problems.
+
+The check is blunt. Run the suite against a straw implementation that answers every request with a plausible shape and no behaviour. Every scenario should fail; any that passes is asserting nothing. It found one on its first run: "authentication succeeds" was checking only for a 200, which a straw returns for everything, so it now asserts that the response identifies the customer who registered.
+
+A contract nobody has seen fail is a contract nobody has tested.
+
 ## The part that matters
 
 Look at [`contracts/run.mjs`](contracts/run.mjs) and notice what is missing from it: any mention of TypeScript or Python. It speaks only to the HTTP interface the knowledge describes.

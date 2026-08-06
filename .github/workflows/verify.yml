@@ -27,6 +27,12 @@ jobs:
       - name: Both stacks against one contract suite
         run: node verify.mjs
 
+      # Traceability counts contracts that exist. This checks they assert
+      # something: every scenario must fail against an implementation that
+      # does nothing correct.
+      - name: Vacuity check
+        run: node contracts/vacuity.mjs
+
   knowledge:
     runs-on: ubuntu-latest
     steps:

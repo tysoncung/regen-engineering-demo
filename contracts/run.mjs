@@ -166,12 +166,16 @@ const steps = [
   // --- given / setup ---
   [
     /^a customer registered with "(.*)"$/,
-    async (ctx, [email]) => {
+    async (ctx, [email], _raw, step) => {
       const r = await call('POST', '/customers', { email })
       ctx.lastStatus = r.status
       ctx.lastBody = r.data
       if (r.status === 201) ctx.customerId = r.data.id
       ctx.email = email
+      // As a Given, this is a precondition rather than the thing under test, so
+      // a failure here means the scenario never reached its subject.
+      if (step.keyword === 'Given')
+        expect(r.status === 201, `precondition failed: registering ${email} returned ${r.status}`)
     },
   ],
   [
@@ -372,7 +376,17 @@ const steps = [
   ],
   [
     /^authentication succeeds$/,
-    (ctx) => expect(ctx.lastStatus === 200, `expected 200, got ${ctx.lastStatus}`),
+    (ctx) => {
+      // A status alone is a weak assertion: any implementation that answers 200
+      // to everything satisfies it. Found by the vacuity check. Succeeding must
+      // mean the caller learns which customer authenticated.
+      expect(ctx.lastStatus === 200, `expected 200, got ${ctx.lastStatus}`)
+      expect(ctx.lastBody?.id, `expected the response to identify the customer, got ${JSON.stringify(ctx.lastBody)}`)
+      expect(
+        ctx.lastBody.id === ctx.customerId,
+        `authenticated as ${ctx.lastBody.id} but registered ${ctx.customerId}`,
+      )
+    },
   ],
   [
     /^authentication fails$/,
@@ -414,7 +428,7 @@ async function addressIdFor(ctx, line) {
 async function runStep(ctx, step) {
   for (const [pattern, fn] of steps) {
     const m = pattern.exec(step.text)
-    if (m) return fn(ctx, m.slice(1), step.text)
+    if (m) return fn(ctx, m.slice(1), step.text, step)
   }
   throw new Error(`no step definition matches: ${step.keyword} ${step.text}`)
 }
