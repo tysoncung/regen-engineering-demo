@@ -113,8 +113,11 @@ const routes = [
     if (!state.customers.get(id)) return { status: 404 }
     return {
       status: 200,
+      // hotfix: page was timing out on a customer with thousands of addresses.
+      // only send the 50 most recent.
       body: addressesOf(id)
         .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-50)
         .map((a) => ({ id: a.id, line: a.line, isDefault: a.isDefault })),
     }
   }],
