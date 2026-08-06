@@ -39,21 +39,17 @@ jobs:
       # than an npx invocation that would only pretend to work.
       - name: Validate the knowledge tree
         run: |
-          git clone --depth 1 https://github.com/tysoncung/regen-engineering-schema /tmp/schema
-          cd /tmp/schema && npm install --silent
-          node tools/validate.mjs "$GITHUB_WORKSPACE"
+          npx -y -p regen-engineering-schema regen-validate "$GITHUB_WORKSPACE"
 
       - name: Impact analysis sanity check
         run: |
-          cd /tmp/schema
-          node tools/impact.mjs BR-002 "$GITHUB_WORKSPACE"
+          npx -y -p regen-engineering-schema regen-impact BR-002 "$GITHUB_WORKSPACE"
 
       - name: Knowledge graph in the job summary
         run: |
-          cd /tmp/schema
           echo '## Knowledge graph' >> "$GITHUB_STEP_SUMMARY"
-          node tools/graph.mjs --tree "$GITHUB_WORKSPACE" | sed -e '1i\
+          npx -y -p regen-engineering-schema regen-graph --tree "$GITHUB_WORKSPACE" | sed -e '1i\
           ```mermaid' -e '$a\
           ```' >> "$GITHUB_STEP_SUMMARY"
           echo '## Blast radius of BR-002' >> "$GITHUB_STEP_SUMMARY"
-          node tools/impact.mjs BR-002 "$GITHUB_WORKSPACE" --graph >> "$GITHUB_STEP_SUMMARY"
+          npx -y -p regen-engineering-schema regen-impact BR-002 "$GITHUB_WORKSPACE" --graph >> "$GITHUB_STEP_SUMMARY"
