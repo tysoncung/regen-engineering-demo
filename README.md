@@ -147,6 +147,16 @@ npx -p regen-engineering-schema regen-debt .        # the five debt metrics
 
 From [regen-engineering-schema](https://github.com/tysoncung/regen-engineering-schema).
 
+## This demo is stateless, deliberately
+
+Nothing here touches a database, which was an unexamined limit rather than a
+simplification, and it hid the first question anyone asks about a real system.
+
+[regen-engineering-stateful](https://github.com/tysoncung/regen-engineering-stateful)
+is the reference for that, and it carries the result that came out of it: an
+implementation that drops every table at startup passes all eighteen of its
+ordinary contract scenarios and one of nine stateful ones.
+
 ## Licence
 
 MIT for the code, CC BY-SA 4.0 for the knowledge and documentation.
